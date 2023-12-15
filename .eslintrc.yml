@@ -1,0 +1,36 @@
+env:
+  browser: true
+  es2021: true
+extends:
+  - 'eslint-config-discourse'
+  - 'plugin:@typescript-eslint/recommended-requiring-type-checking'
+  - 'plugin:@stylistic/disable-legacy'
+  - 'prettier'
+parser: '@typescript-eslint/parser'
+parserOptions:
+  project: true
+  ecmaVersion: latest
+  sourceType: module
+plugins:
+  - '@stylistic'
+rules:
+  '@stylistic/semi': [error, always]
+  linebreak-style: [error, unix]
+  quotes: [error, single, { avoidEscape: true }]
+  '@typescript-eslint/no-unused-vars': [error, { varsIgnorePattern: '^_' }]
+  no-unused-vars: [error, { varsIgnorePattern: '^_' }]
+  max-len: [error, 120]
+  no-multiple-empty-lines: [error, { max: 3 }]
+  no-restricted-globals: 'off'
+  '@typescript-eslint/require-await': 'error'
+  no-shadow: [error, { allow: ['_'] }]
+
+ignorePatterns:
+  - 'coverage/*'
+
+overrides:
+  - files: ['./*.[jt]s']
+    extends:
+      - 'plugin:@typescript-eslint/disable-type-checked'
+    parserOptions:
+      project: false

@@ -1,0 +1,13 @@
+node_modules/
+data/
+config.yml
+
+# lock文件
+pnpm-lock.yaml
+flake.lock
+
+# 构建产物
+dist
+docs/
+coverage
+.tsbuildinfo

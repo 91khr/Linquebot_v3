@@ -1,0 +1,6 @@
+{
+  // Comments are supported, like tsconfig.json
+  "entryPoints": ["src/index.ts", "src/lib", "src/bridge"],
+  "entryPointStrategy": "expand",
+  "out": "docs"
+}
