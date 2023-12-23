@@ -6,6 +6,7 @@ import { global_log } from './lib/logger.js';
 import { global_i18n } from './lib/i18n.js';
 import { load_plugins } from './lib/plugin.js';
 import { AppManager, init_plugins } from './lib/app_manager.js';
+import { init_core, loaded_core } from './core_plugin.js';
 
 const conf = await read_config();
 if (conf.locale) await global_i18n.set_locale(conf.locale);
@@ -23,7 +24,10 @@ const bot = await (async () => {
 })();
 
 const app = new AppManager({ conf, bot });
-await init_plugins(app, await load_plugins(app));
+const plugins = await load_plugins(app);
+plugins.push(loaded_core(app));
+await init_plugins(app, plugins);
+init_core(app, plugins);
 
 try {
   // Suppress eslint error (

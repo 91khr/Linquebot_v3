@@ -1,4 +1,5 @@
 import { global_log } from '@/lib/logger.js';
+import { MaybePromiseLike } from './utils.js';
 
 /**
  * A bridge between an IM and the bot.
@@ -10,16 +11,16 @@ import { global_log } from '@/lib/logger.js';
  */
 export interface Bridge {
   /** Log the bot in */
-  login(login: unknown): PromiseLike<LoginStatus>;
+  login(login: unknown): MaybePromiseLike<LoginStatus>;
   /** Log the bot out */
-  logout(): PromiseLike<void>;
-  poll_message(): PromiseLike<PolledMessage>;
+  logout(): MaybePromiseLike<void>;
+  poll_message(): MaybePromiseLike<PolledMessage>;
   compare_message_id(a: unknown, b: unknown): number;
 }
 
 export type ChatImpl = {
   id: string;
-  send_message(msg: SendingMessage): PromiseLike<void>;
+  send_message(msg: SendingMessage): MaybePromiseLike<void>;
 };
 type Replace<T, U> = {
   [k in keyof T | keyof U]: k extends keyof U ? U[k] : k extends keyof T ? T[k] : never;
@@ -27,8 +28,8 @@ type Replace<T, U> = {
 export type Chat = Replace<
   ChatImpl,
   {
-    send_message(msg: SendingMessage | string): PromiseLike<void>;
-    send_text_tmpl(ss: TemplateStringsArray, ...sv: unknown[]): PromiseLike<void>;
+    send_message(msg: SendingMessage | string): MaybePromiseLike<void>;
+    send_text_tmpl(ss: TemplateStringsArray, ...sv: unknown[]): MaybePromiseLike<void>;
   }
 >;
 
@@ -45,11 +46,11 @@ type LoginStatus = { kind: 'ok' } | { kind: 'error'; info?: string };
 export type PolledMessage = { msg: IncomingMessage; chat: ChatImpl };
 
 export type IncomingMessageAsset = { location: [number, number] } & (
-  | { kind: 'image'; data: () => PromiseLike<Buffer> }
+  | { kind: 'image'; data: () => MaybePromiseLike<Buffer> }
   | { kind: 'mention'; id: unknown; name: string }
 );
 export type SendingMessageAsset = { location?: [number, number] } & (
-  | { kind: 'image'; data: PromiseLike<Buffer> }
+  | { kind: 'image'; data: MaybePromiseLike<Buffer> }
   | { kind: 'mention'; id: unknown; name: string }
 );
 
@@ -66,7 +67,7 @@ export type IncomingMessage = MessageCommon & {
   raw?: unknown;
   id: unknown;
   from?: User;
-  reply_to?: () => PromiseLike<IncomingMessage>;
+  reply_to?: () => MaybePromiseLike<IncomingMessage>;
   assets: IncomingMessageAsset[];
 };
 
@@ -75,6 +76,6 @@ export type BridgeModuleType = {
 };
 export async function load_bridge(name: string): Promise<Bridge> {
   using _ = global_log.region_tmpl()`Loading bridge ${name}`;
-  const mod = (await import(`./${name}.js`)) as BridgeModuleType;
+  const mod = (await import(`../bridge/${name}.js`)) as BridgeModuleType;
   return new mod.Bridge();
 }

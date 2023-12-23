@@ -3,8 +3,8 @@
 
 const commands = [
   'npx tsc',
-  'cp config.yml dist/config.yml',
-  'cp config.example.yml dist/config.example.yml',
+  'cp config.yaml dist/config.yaml',
+  'cp config.example.yaml dist/config.example.yaml',
 ];
 
 /*****************************************/

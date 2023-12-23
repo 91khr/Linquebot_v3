@@ -1,0 +1,9 @@
+bridges:
+  tg:
+    login: { token: 'your tg token' }
+    bot_addresser: 'linquebot'
+    cmd_prefix: '/'
+active_bridge: tg
+self_pronoun: '琳酱'
+
+watchdog_interval: 600 # 10 minutes

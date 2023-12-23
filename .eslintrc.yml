@@ -22,6 +22,7 @@ rules:
   max-len: [error, 120]
   no-multiple-empty-lines: [error, { max: 3 }]
   no-restricted-globals: 'off'
+  require-await: off
   '@typescript-eslint/require-await': 'error'
   '@typescript-eslint/no-shadow': [error, { allow: ['_'] }]
   no-shadow: off

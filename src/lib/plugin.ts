@@ -4,57 +4,63 @@ import { AppManager } from '@/lib/app_manager.js';
 import { readdir } from 'fs/promises';
 import path from 'path';
 import { DbDecl } from './db.js';
+import { MaybePromiseLike } from './utils.js';
 
-export type PluginManifest = {
-  name?: string;
+type WithDoc = {
   doc_short: string;
   doc_long?: string;
-  db: DbDecl;
-  peerdb: string[];
-  listeners: PluginListener[];
-  init?: (app: AppManager) => PromiseLike<void>;
 };
 
-type MkListener<T> = {
-  dos_short: string;
-  doc_long?: string;
-} & T;
-export type CmdListener = MkListener<{
+export type PluginDb = {
+  db: DbDecl;
+  peerdb: readonly string[];
+};
+export type PluginDynManifest = WithDoc & {
+  name?: string;
+  listeners: PluginListener[];
+  init?: (app: AppManager) => MaybePromiseLike<void>;
+};
+export type PluginManifest = PluginDb & PluginDynManifest;
+
+export type CmdListener = WithDoc & {
   kind: 'command';
   name: string;
-  handler: (app: AnyApp, msg: IncomingMessage) => PromiseLike<void>;
+  handler: (app: AnyApp, msg: IncomingMessage, text: string) => MaybePromiseLike<void>;
   permission: HandlerPermission;
-}>;
-export type MsgListener = MkListener<{
+};
+export type MsgListener = WithDoc & {
   kind: 'message';
   name: string;
   is_endpoint: boolean;
   chain_after: string[];
-  handler: (app: AnyApp, msg: IncomingMessage) => PromiseLike<boolean>;
+  handler: (app: AnyApp, msg: IncomingMessage) => MaybePromiseLike<boolean>;
   permission: HandlerPermission;
-}>;
+};
 export type PluginListener = CmdListener | MsgListener;
 
-export type HandlerPermission = { kind: 'admin' | 'anyone' } | { kind: 'custom'; lv: number };
+export type HandlerPermission =
+  | { kind: 'admin'; grantable: 'none' | 'full' | 'non-grant' | 'non-admin' }
+  | { kind: 'anyone' }
+  | { kind: 'custom'; lv: number };
 
 export type PluginModuleType = {
-  manifest: (app: AppManager) => PromiseLike<PluginManifest>;
+  manifest: (app: AppManager) => PluginManifest;
 };
 
 export type LoadedPlugin = PluginManifest & { name: string };
 export async function load_plugins(app: AppManager): Promise<LoadedPlugin[]> {
   using _ = app.log.region('loading plugins...');
   const res = [];
-  for (const f of await readdir(path.dirname(new URL(import.meta.url).pathname), {
+  for (const f of await readdir('./plugin/', {
     withFileTypes: true,
     recursive: false,
   })) {
     if (f.isFile() && (f.name === 'index.js' || !f.name.match(/.js$/))) continue;
     using _ = app.log.region_tmpl()`Loading plugin ${f}`;
-    const fname = f.isDirectory() ? path.join(f.path, 'index.js') : f.path;
+    const fname = f.isDirectory() ? path.join(f.path, 'index.js') : path.join(f.path, f.name);
     const plg = Object.assign(
       { name: path.parse(f.path).name },
-      await ((await import(fname)) as PluginModuleType).manifest(app)
+      ((await import(fname)) as PluginModuleType).manifest(app)
     );
     res.push(plg);
   }

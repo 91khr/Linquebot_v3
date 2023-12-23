@@ -40,3 +40,10 @@ export function compare_perm(a: HandlerPermission, b: HandlerPermission) {
     return an < bn ? -1 : an === bn ? 0 : 1;
   }
 }
+
+export const ensure_extend =
+  <T>() =>
+  <U extends T>(a: U) =>
+    a;
+
+export type MaybePromiseLike<T> = T | PromiseLike<T>;

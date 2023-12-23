@@ -11,8 +11,8 @@ import {
 import { AnyApp, App } from './app.js';
 import { AppConfig, BridgeConfig } from './config.js';
 import { SupervisorMessage } from './supervisor_ipc.js';
-import { compare_perm, mkRaii } from './utils.js';
-import { I18nEngine } from './i18n.js';
+import { MaybePromiseLike, compare_perm, mkRaii } from './utils.js';
+import { I18nEngine, global_i18n } from './i18n.js';
 import { DbDecl, DbManager, DbType } from './db.js';
 
 const mgrdata = {
@@ -21,7 +21,8 @@ const mgrdata = {
 } as const;
 
 export class AppManager {
-  log: Logger = global_log.clone();
+  log: Logger = global_log;
+  i18n: I18nEngine = global_i18n;
   bot: Bridge;
   conf: AppConfig;
   brconf: BridgeConfig;
@@ -31,9 +32,9 @@ export class AppManager {
     [k: string]:
       | {
           perm: HandlerPermission;
-          fn: (app: AnyApp, msg: IncomingMessage) => PromiseLike<void>;
+          fn: (app: AnyApp, msg: IncomingMessage, text: string) => MaybePromiseLike<void>;
           selfdb: string;
-          peerdb: string[];
+          peerdb: readonly string[];
         }
       | undefined;
   } = {};
@@ -42,9 +43,9 @@ export class AppManager {
     is_endpoint: boolean;
     chain_after: string[];
     perm: HandlerPermission;
-    fn: (app: AnyApp, msg: IncomingMessage) => PromiseLike<boolean>;
+    fn: (app: AnyApp, msg: IncomingMessage) => MaybePromiseLike<boolean>;
     selfdb: string;
-    peerdb: string[];
+    peerdb: readonly string[];
   }[] = [];
   private pending_transaction_data: Set<PromiseLike<void>> = new Set();
 
@@ -77,12 +78,12 @@ export class AppManager {
       get id() {
         return this.inner.id;
       }
-      send_message(msg: SendingMessage | string): PromiseLike<void> {
+      send_message(msg: SendingMessage | string): MaybePromiseLike<void> {
         const msgv = typeof msg === 'string' ? { text: msg } : msg;
         msgv.text = i18n.tr(msgv.text);
         return this.inner.send_message(msgv);
       }
-      send_text_tmpl(ss: TemplateStringsArray, ...sv: unknown[]): PromiseLike<void> {
+      send_text_tmpl(ss: TemplateStringsArray, ...sv: unknown[]): MaybePromiseLike<void> {
         return this.send_message(i18n.tmpl(ss, ...sv));
       }
     }
@@ -114,8 +115,9 @@ export class AppManager {
       (msg.from !== undefined &&
         compare_perm(mgrdb.perm.get(chat.id, msg.from.id) ?? { kind: 'anyone' }, perm) < 0) ||
       perm.kind === 'anyone';
-    const mkapp = (selfdb: string, peerdb: string[]) => {
+    const mkapp = (selfdb: string, peerdb: readonly string[]) => {
       return new App<never, []>({
+        conf: this.conf,
         chat,
         db: this.db.scope(selfdb),
         peerdb: Object.fromEntries(peerdb.map((db) => [db, this.db.scope(db)])),
@@ -140,7 +142,11 @@ export class AppManager {
         return;
       }
       if (no_perm(handler.perm)) return;
-      await handler.fn(mkapp(handler.selfdb, handler.peerdb), msg);
+      await handler.fn(
+        mkapp(handler.selfdb, handler.peerdb),
+        msg,
+        msg.text.slice(cmdctnt[0].length + 1).trim()
+      );
     } else {
       const passed_msg = new Map<string, boolean>();
       // Check if any message handler match
