@@ -56,9 +56,14 @@ class FileLock implements Disposable {
 }
 
 type DataT<T> = NonNullable<T> | { [k: string | number]: DataT<T> };
-type RegistryContent = { kind: 'leaf'; nkeys: number; cache: DataT<unknown>; pending: number };
+type RegistryContent = {
+  kind: 'leaf';
+  nkeys: number;
+  cache: DataT<unknown> | undefined;
+  pending: number;
+};
 type RegistryT = { kind: 'inner'; sub: { [name: string]: RegistryT | RegistryContent } };
-type Nested<T> = { [k: string | number]: Nested<T> | T } | T;
+type Nested<T> = { [k: string | number]: Nested<T> | T };
 
 export class DbManager {
   app: AppManager;
@@ -96,54 +101,81 @@ export class DbManager {
     for (const [k, v] of Object.entries(mkreg(tree).sub)) this.registry.sub[k] = v;
   }
 
-  private walk_scope<T>(scope: string | string[], cb: (ctnt: RegistryContent) => T) {
+  async scope<T>(scope: string | string[]) {
+    const p = typeof scope === 'string' ? [scope] : scope;
+    const read_db = async (path: string[], reg: RegistryContent) => {
+      if (!reg.cache) {
+        const fname = `data/${path.join('/')}.json`;
+        using _ = await FileLock.acquire(fname);
+        reg.cache = JSON.parse(await fs.readFile(fname, { encoding: 'utf8' })) as DataT<unknown>;
+      }
+      return new Db(reg.cache) as T;
+    };
+    let reg = this.registry;
+    for (const [i, k] of p.entries()) {
+      const sub = reg.sub[k];
+      if (sub.kind === 'leaf') {
+        assert(i === p.length - 1, `Non leaf scope: ${p.join('/')}`);
+        return await read_db(p, sub);
+      }
+      reg = sub;
+    }
+    const maptree = async (path: string[], tree: RegistryT | RegistryContent): Promise<unknown> => {
+      if (tree.kind === 'leaf') return await read_db(path, tree);
+      else {
+        const res: Nested<unknown> = {};
+        for (const [k, sub] of Object.entries(tree.sub)) res[k] = await maptree(p.concat(k), sub);
+        return res;
+      }
+    };
+    return (await maptree(p, reg)) as T;
+  }
+
+  commit(app: AppManager, scope: string | string[], dbtree: unknown) {
+    const replace = (depth: number, dst: Nested<unknown>, src: Nested<unknown>) => {
+      if (depth === 0) return src;
+      const res: Nested<unknown> = {};
+      for (const k of [...Object.keys(dst), ...Object.keys(src)])
+        if (k in src) {
+          if (k in dst)
+            res[k] = replace(depth - 1, dst[k] as Nested<unknown>, src[k] as Nested<unknown>);
+          else res[k] = src[k];
+        } else res[k] = dst[k];
+      return res;
+    };
+    const write_db = (path: string[], db: Db<unknown>, reg: RegistryContent) => {
+      if (typeof reg.cache === 'object' && reg.cache)
+        reg.cache = replace(reg.nkeys, reg.cache as Nested<unknown>, db.data);
+      else reg.cache = db.data;
+      if (++reg.pending >= (app.conf.internal?.db_write_batch_size ?? 1)) {
+        reg.pending = 0;
+        const cache = reg.cache;
+        app.ensure_transaction(
+          (async () => {
+            using _ = await FileLock.acquire(`data/${path.join('/')}.json`);
+            await fs.mkdir(`data/${path.slice(0, -1).join('/')}`, { recursive: true });
+            await fs.writeFile(`data/${path.join('/')}.json`, JSON.stringify(cache));
+          })()
+        );
+      }
+    };
     const p = typeof scope === 'string' ? [scope] : scope;
     let reg = this.registry;
     for (const [i, k] of p.entries()) {
       const sub = reg.sub[k];
       if (sub.kind === 'leaf') {
         assert(i === p.length - 1, `Non leaf scope: ${p.join('/')}`);
-        break;
+        return write_db(p, dbtree as Db<unknown>, sub);
       }
       reg = sub;
     }
-    const maptree = (tree: RegistryT | RegistryContent): Nested<T> => {
-      if (tree.kind === 'leaf') return cb(tree);
-      else return Object.fromEntries(Object.entries(tree.sub).map(([k, sub]) => [k, maptree(sub)]));
+    const maptree = (path: string[], regtree: RegistryT | RegistryContent, db: unknown): void => {
+      if (regtree.kind === 'leaf') write_db(path, db as Db<unknown>, regtree);
+      else
+        for (const [k, sub] of Object.entries(regtree.sub))
+          maptree(path.concat(k), sub, (db as { [k: string | number]: unknown })[k]);
     };
-    return maptree(reg);
-  }
-  scope<T>(scope: string | string[]) {
-    return this.walk_scope(scope, (sub) => new Db(sub.cache)) as unknown as T;
-  }
-
-  commit(app: AppManager, scope: string | string[], db: Db<unknown>) {
-    this.walk_scope(scope, (reg) => {
-      /* eslint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/no-unsafe-member-access,
-       @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-argument, */
-      const replace = (dst: any, src: any) => {
-        const res: { [k: number | string]: any } = {};
-        for (const k of [...Object.keys(dst), ...Object.keys(src)])
-          if (k in src) res[k] = k in dst ? replace(dst[k], src[k]) : src[k];
-          else res[k] = dst[k];
-        return res;
-      };
-      /* eslint-enable @typescript-eslint/no-explicit-any, @typescript-eslint/no-unsafe-member-access,
-       @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-argument, */
-      if (typeof reg.cache === 'object' && reg.cache) reg.cache = replace(reg.cache, db.data);
-      else reg.cache = db.data;
-      const path = typeof scope === 'string' ? [scope] : scope;
-      if (++reg.pending >= (app.conf.internal?.db_write_batch_size ?? 1)) {
-        reg.pending = 0;
-        const cache = reg.cache;
-        app.ensure_transaction(
-          (async () => {
-            using _ = await FileLock.acquire(`data/${path.join('/')}`);
-            await fs.writeFile(`data/${path.join('/')}.json`, JSON.stringify(cache));
-          })()
-        );
-      }
-    });
+    maptree(p, reg, dbtree);
   }
 }
 
@@ -153,36 +185,29 @@ export class Db<T, K extends number | readonly string[] = number> {
   constructor(cache: DataT<T>) {
     this.cache = cache;
   }
-  /* eslint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/no-unsafe-member-access,
-   @typescript-eslint/no-unsafe-assignment
-   ---
-   No, that's impossible for a lang without any type info (tbh, can't have in this scenary),
-   */
   get(...keys: Repeated<string | number, [], GetNKeys<K>>): T | undefined {
-    let reg: any = this.data;
-    let cache: any = this.cache;
+    let reg: Nested<unknown> = this.data;
+    let cache: Nested<unknown> | undefined = this.cache;
     for (let i = 0; i < keys.length - 1; ++i) {
       const k = keys[i];
       if (!(k in reg)) reg[k] = {};
       if (cache && !(k in cache)) cache = undefined;
-      reg = reg[k];
+      reg = reg[k] as Nested<unknown>;
     }
     const k = keys[keys.length - 1];
     if (cache && !(k in reg)) reg[k] = cache[k];
     return reg[k] as T | undefined;
   }
   set(...keys: [...Repeated<string | number, [], GetNKeys<K>>, T]): void {
-    let reg: any = this.data;
+    let reg: Nested<unknown> = this.data;
     for (let i = 0; i < keys.length - 2; ++i) {
-      const k = keys[i];
-      if (!((k as string | number) in reg)) reg[k] = {};
-      reg = reg[k];
+      const k = keys[i] as string | number;
+      if (!(k in reg)) reg[k] = {};
+      reg = reg[k] as Nested<unknown>;
     }
     if (keys.length >= 2) {
-      const k = keys[keys.length - 2];
+      const k = keys[keys.length - 2] as string | number;
       reg[k] = keys[keys.length - 1];
-    } else reg = keys[0];
+    } else this.data = keys[0] as NonNullable<T>;
   }
-  /* eslint-enable @typescript-eslint/no-explicit-any, @typescript-eslint/no-unsafe-member-access,
-   @typescript-eslint/no-unsafe-assignment */
 }

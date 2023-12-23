@@ -8,12 +8,13 @@ import {
   PolledMessage,
   SendingMessage,
 } from '@/lib/bridge.js';
-import { AnyApp, App } from './app.js';
+import { AnyApp, App, PeerDbType } from './app.js';
 import { AppConfig, BridgeConfig } from './config.js';
 import { SupervisorMessage } from './supervisor_ipc.js';
 import { MaybePromiseLike, compare_perm, mkRaii } from './utils.js';
 import { I18nEngine, global_i18n } from './i18n.js';
-import { DbDecl, DbManager, DbType } from './db.js';
+import { DbManager, DbType } from './db.js';
+import * as util from 'util';
 
 const mgrdata = {
   perm: { proto: (): HandlerPermission => ({ kind: 'anyone' }), nkeys: ['chat', 'user'] },
@@ -91,20 +92,11 @@ export class AppManager {
   }
 
   async dispatch({ chat: arg_chat, msg }: PolledMessage) {
-    const getdb = <T extends DbDecl>(
-      scope: string,
-      proto: { [k in keyof T]: unknown }
-    ): DbType<T> => {
-      return Object.fromEntries(
-        Object.keys(proto).map((k) => [k, this.db.scope([scope, k])])
-      ) as unknown as DbType<T>;
-    };
-    const mgrdb = getdb<typeof mgrdata>('manager', mgrdata);
-    using _write_db = mkRaii(() =>
-      Object.keys(mgrdb).forEach((k) =>
-        this.db.commit(this, ['manager', k], mgrdb[k as keyof typeof mgrdata])
-      )
-    );
+    const mgrdb = await this.db.scope<DbType<typeof mgrdata>>('manager');
+    this.log.tmpl('debug')`Got: ${util.inspect(arg_chat, { colors: true })} ${util.inspect(msg, {
+      colors: true,
+    })}`;
+    using _write_db = mkRaii(() => this.db.commit(this, 'manager', mgrdb));
     if (!(arg_chat.id in mgrdb.locale)) mgrdb.locale.set(arg_chat.id, 'raw');
     const cur_locale = mgrdb.locale.get(arg_chat.id)!;
     if (!(cur_locale in this.i18n_cache))
@@ -112,15 +104,17 @@ export class AppManager {
     const i18n = this.i18n_cache[cur_locale];
     const chat = this.wrap_chat(i18n, arg_chat);
     const no_perm = (perm: HandlerPermission) =>
-      (msg.from !== undefined &&
-        compare_perm(mgrdb.perm.get(chat.id, msg.from.id) ?? { kind: 'anyone' }, perm) < 0) ||
-      perm.kind === 'anyone';
-    const mkapp = (selfdb: string, peerdb: readonly string[]) => {
-      return new App<never, []>({
+      msg.from !== undefined &&
+      compare_perm(mgrdb.perm.get(chat.id, msg.from.id) ?? { kind: 'anyone' }, perm) < 0 &&
+      perm.kind !== 'anyone';
+    const mkapp = async (selfname: string, peername: readonly string[]) => {
+      const peerdb: PeerDbType<string[]> = {};
+      for (const name of peername) peerdb[name] = await this.db.scope(name);
+      return new App<never, string[]>({
         conf: this.conf,
         chat,
-        db: this.db.scope(selfdb),
-        peerdb: Object.fromEntries(peerdb.map((db) => [db, this.db.scope(db)])),
+        db: await this.db.scope(selfname),
+        peerdb,
         i18n,
       });
     };
@@ -134,19 +128,18 @@ export class AppManager {
         void chat.send_text_tmpl`Unrecognized command: ${msg.text}`;
         return;
       }
-      if (cmdctnt[2] && cmdctnt[2] !== this.brconf.bot_addresser) return;
+      if (cmdctnt[2] && cmdctnt[2] !== '@' + this.brconf.bot_addresser) return;
       const handler = this.cmd_handlers[cmdctnt[1]];
       if (!handler) {
         this.log.tmpl()`Undefined handler for command ${cmdctnt[1]}`;
-        void chat.send_text_tmpl`Undefined handler for command ${cmdctnt[1]}`;
+        if (cmdctnt[2]) void chat.send_text_tmpl`Undefined handler for command ${cmdctnt[1]}`;
         return;
       }
       if (no_perm(handler.perm)) return;
-      await handler.fn(
-        mkapp(handler.selfdb, handler.peerdb),
-        msg,
-        msg.text.slice(cmdctnt[0].length + 1).trim()
-      );
+      const app = await mkapp(handler.selfdb, handler.peerdb);
+      await handler.fn(app, msg, msg.text.slice(cmdctnt[0].length + 1).trim());
+      this.db.commit(this, handler.selfdb, app.db);
+      for (const peer of handler.peerdb) this.db.commit(this, peer, app.peerdb[peer]);
     } else {
       const passed_msg = new Map<string, boolean>();
       // Check if any message handler match
@@ -166,7 +159,10 @@ export class AppManager {
         // Check for permission
         if (no_perm(perm)) continue;
         // Make db
-        const res = await fn(mkapp(selfdb, peerdb), msg);
+        const app = await mkapp(selfdb, peerdb);
+        const res = await fn(app, msg);
+        this.db.commit(this, selfdb, app.db);
+        for (const peer of peerdb) this.db.commit(this, peer, app.peerdb[peer]);
         passed_msg.set(name, res);
         if (is_endpoint) break;
       }

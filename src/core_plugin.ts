@@ -38,10 +38,10 @@ export function init_core(_app: AppManager, plugins: LoadedPlugin[]) {
     .flatMap((plg) =>
       plg.listeners
         .filter((l): l is CmdListener => l.kind === 'command')
-        .map((l) => `${l.name}: ${l.doc_short}`)
+        .map((l) => `/${l.name}: ${l.doc_short}`)
     )
     .join('\n');
-  brief_help += '---\n';
+  brief_help += '\n---\n';
   brief_help += plugins
     .flatMap((plg) =>
       plg.listeners

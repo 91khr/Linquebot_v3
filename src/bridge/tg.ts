@@ -29,13 +29,25 @@ export class Bridge implements br.Bridge {
   }
   logout(): MaybePromiseLike<void> {}
   async poll_message(): Promise<br.PolledMessage> {
+    const mkmsg = (msg: Message): br.IncomingMessage => ({
+      id: msg.message_id,
+      from: msg.from
+        ? ((user) => ({
+            id: user.id.toString(),
+            name:
+              (user.first_name ?? user.username ?? '') +
+              (user.last_name ? ' ' + user.last_name : ''),
+          }))(msg.from)
+        : undefined,
+      raw: msg,
+      text: msg.text ?? '',
+      assets: [],
+      reply_to_id: msg.reply_to_message?.message_id,
+      reply_to: () => mkmsg(msg),
+    });
     const msg = this.msgqueue.pop() ?? (await new Promise<Message>((res) => (this.waker = res)));
     return {
-      msg: {
-        id: msg.message_id,
-        text: msg.text ?? '',
-        assets: [],
-      },
+      msg: mkmsg(msg),
       chat: {
         id: String(msg.chat.id),
         send_message: async (smsg) => {

@@ -87,3 +87,4 @@ while (true) {
     if (!(config.debug?.reboot_on_watchdog ?? true)) break;
   } else if (subevent.kind !== 'shutdown') break;
 }
+process.exit();
