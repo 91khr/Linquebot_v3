@@ -10,7 +10,12 @@ type WaifeData = {
 };
 const waife_db = {
   db: {
-    active_users: { proto: mkproto<string[]>(), nkeys: ['group'] },
+    active_users: {
+      proto: mkproto<Set<string>>(),
+      nkeys: ['group'],
+      read: (s: string[]) => new Set(s),
+      write: (s: Set<string>) => [...s.values()],
+    },
     waifes: {
       proto: mkproto<WaifeData>(),
       nkeys: 2,
@@ -22,12 +27,12 @@ type WaifeApp = MyApp<typeof waife_db>;
 
 function msg_handler(app: WaifeApp, msg: IncomingMessage) {
   if (!msg.from) return true;
-  const users = app.db.active_users.get_or_insert(app.chat.id, () => []);
-  if (users.indexOf(msg.from.id) !== -1) {
+  const users = app.db.active_users.get_or_insert(app.chat.id, () => new Set());
+  if (users.has(msg.from.id)) {
     app.log.tmpl('debug')`Replicate user ${msg.from.id}`;
     return true;
   }
-  users.push(msg.from.name);
+  users.add(msg.from.name);
   app.log.tmpl('debug')`Get user ${msg.from.id} => ${users}`;
   return true;
 }
@@ -45,14 +50,17 @@ function waife_handler(app: WaifeApp, msg: IncomingMessage) {
     return;
   }
   const users = app.db.active_users.get(app.chat.id);
-  if (!users) {
-    void app.chat
-      .send_text_tmpl`No users in group, please wait for ${app.conf.self_pronoun} to collect more!`;
+  do {
+    if (!users) break;
+    data.date = today;
+    const cand = [...users.values()].filter((n) => n !== msg.from!.name);
+    if (cand.length === 0) break;
+    data.waife = cand[Math.floor(Math.random() * cand.length)];
+    void app.chat.send_text_tmpl`Your waife today is ${data.waife}`;
     return;
-  }
-  data.date = today;
-  data.waife = users[Math.floor(Math.random() * users.length)];
-  void app.chat.send_text_tmpl`Your waife today is ${data.waife}`;
+  } while (false);
+  void app.chat
+    .send_text_tmpl`No users in group, please wait for ${app.conf.self_pronoun} to collect more!`;
 }
 
 export const manifest = (app: AppManager) =>

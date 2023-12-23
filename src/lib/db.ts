@@ -11,9 +11,12 @@ export type DbDecl = {
   [name: string]: {
     proto?: () => unknown;
     nkeys: number | readonly string[];
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any  -- such function requires any to call...
+    /* eslint-disable @typescript-eslint/no-explicit-any
+     --- such function requires any to call...
+     */
     read?: (k: any) => unknown;
-    write?: (k: unknown) => string;
+    write?: (k: any) => unknown;
+    /* eslint-enable @typescript-eslint/no-explicit-any */
   };
 };
 /**
@@ -68,6 +71,9 @@ type RegistryContent = {
   nkeys: number;
   cache: DataT<unknown> | undefined;
   pending: number;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any  -- such function requires any to call...
+  read?: (k: any) => unknown;
+  write?: (k: unknown) => unknown;
 };
 type RegistryT = { kind: 'inner'; sub: { [name: string]: RegistryT | RegistryContent } };
 type Nested<T> = { [k: string | number]: Nested<T> | T };
@@ -93,6 +99,8 @@ export class DbManager {
                 nkeys: typeof decl.nkeys === 'number' ? decl.nkeys : decl.nkeys.length,
                 cache: undefined,
                 pending: 0,
+                read: decl.read,
+                write: decl.write,
               },
             ])
           ),
@@ -110,13 +118,24 @@ export class DbManager {
 
   async scope<T>(scope: string | string[]) {
     const p = typeof scope === 'string' ? [scope] : scope;
+    const rec_read = (depth: number, reg: RegistryContent, cache: Nested<unknown>) => {
+      if (depth === 1) for (const k of Object.keys(cache)) cache[k] = reg.read!(cache[k]);
+      else
+        for (const k of Object.keys(cache)) rec_read(depth - 1, reg, cache[k] as Nested<unknown>);
+    };
     const read_db = async (path: string[], reg: RegistryContent) => {
-      if (!reg.cache) {
+      while (!reg.cache) {
         const fname = `data/${path.join('/')}.json`;
         using _ = await FileLock.acquire(fname);
-        if (await can_access(fname)) {
-          reg.cache = JSON.parse(await fs.readFile(fname, { encoding: 'utf8' })) as DataT<unknown>;
+        if (!(await can_access(fname))) {
+          if (reg.nkeys > 0) reg.cache = {};
+          break;
         }
+        reg.cache = JSON.parse(await fs.readFile(fname, { encoding: 'utf8' })) as DataT<unknown>;
+        if (!reg.read) break;
+        if (reg.nkeys === 0) reg.cache = reg.read(reg.cache) as DataT<unknown>;
+        else rec_read(reg.nkeys, reg, reg.cache);
+        break;
       }
       return new Db(reg.cache) as T;
     };
@@ -152,6 +171,16 @@ export class DbManager {
         } else res[k] = dst[k];
       return res;
     };
+    const rec_write = (depth: number, reg: RegistryContent, cache: Nested<unknown>): unknown => {
+      if (depth === 0) return reg.write!(cache);
+      else
+        return Object.fromEntries(
+          Object.entries(cache).map(([k, v]) => [
+            k,
+            rec_write(depth - 1, reg, v as Nested<unknown>),
+          ])
+        );
+    };
     const write_db = (path: string[], db: Db<unknown>, reg: RegistryContent) => {
       if (!db.data) return;
       if (typeof reg.cache === 'object' && reg.cache)
@@ -163,8 +192,11 @@ export class DbManager {
         app.ensure_transaction(
           (async () => {
             using _ = await FileLock.acquire(`data/${path.join('/')}.json`);
+            const data = JSON.stringify(
+              reg.write ? rec_write(reg.nkeys, reg, reg.cache as Nested<unknown>) : cache
+            );
             await fs.mkdir(`data/${path.slice(0, -1).join('/')}`, { recursive: true });
-            await fs.writeFile(`data/${path.join('/')}.json`, JSON.stringify(cache));
+            await fs.writeFile(`data/${path.join('/')}.json`, data);
           })()
         );
       }
