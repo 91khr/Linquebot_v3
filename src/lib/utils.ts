@@ -31,6 +31,13 @@ export function mkAsyncRaii(fn: () => Promise<void>): AsyncDisposable {
   return { [Symbol.asyncDispose]: fn };
 }
 
+export function escape(str: string): string {
+  return str.replaceAll(
+    /[\n\t'"]/g,
+    (s) => ({ '\n': '\\n', '\t': '\\t', "'": "\\'", '"': '\\"' })[s] ?? `\\${s}`
+  );
+}
+
 export function compare_perm(a: HandlerPermission, b: HandlerPermission) {
   if (a.kind === 'custom' && b.kind === 'custom') return a.lv < b.lv ? -1 : a.lv === b.lv ? 0 : 1;
   else {
@@ -45,5 +52,10 @@ export const ensure_extend =
   <T>() =>
   <U extends T>(a: U) =>
     a;
+export function mkproto<T>(): () => T {
+  return () => {
+    throw new Error('mkproto should not be invoked!');
+  };
+}
 
 export type MaybePromiseLike<T> = T | PromiseLike<T>;

@@ -32,7 +32,7 @@ export class AppManager {
   cmd_handlers: {
     [k: string]:
       | {
-          perm: HandlerPermission;
+          perm?: HandlerPermission;
           fn: (app: AnyApp, msg: IncomingMessage, text: string) => MaybePromiseLike<void>;
           selfdb: string;
           peerdb: readonly string[];
@@ -42,8 +42,8 @@ export class AppManager {
   msg_handlers: {
     name: string;
     is_endpoint: boolean;
-    chain_after: string[];
-    perm: HandlerPermission;
+    chain_after?: string[];
+    perm?: HandlerPermission;
     fn: (app: AnyApp, msg: IncomingMessage) => MaybePromiseLike<boolean>;
     selfdb: string;
     peerdb: readonly string[];
@@ -79,10 +79,17 @@ export class AppManager {
       get id() {
         return this.inner.id;
       }
+      raw_send_message(msg: SendingMessage | string): MaybePromiseLike<void> {
+        const msgv = typeof msg === 'string' ? { text: msg } : msg;
+        return this.inner.send_message(msgv);
+      }
       send_message(msg: SendingMessage | string): MaybePromiseLike<void> {
         const msgv = typeof msg === 'string' ? { text: msg } : msg;
         msgv.text = i18n.tr(msgv.text);
         return this.inner.send_message(msgv);
+      }
+      raw_send_text_tmpl(ss: TemplateStringsArray, ...sv: unknown[]): MaybePromiseLike<void> {
+        return this.raw_send_message(i18n.tmpl(ss, ...sv));
       }
       send_text_tmpl(ss: TemplateStringsArray, ...sv: unknown[]): MaybePromiseLike<void> {
         return this.send_message(i18n.tmpl(ss, ...sv));
@@ -113,6 +120,7 @@ export class AppManager {
       return new App<never, string[]>({
         conf: this.conf,
         chat,
+        log: this.log,
         db: await this.db.scope(selfname),
         peerdb,
         i18n,
@@ -135,7 +143,7 @@ export class AppManager {
         if (cmdctnt[2]) void chat.send_text_tmpl`Undefined handler for command ${cmdctnt[1]}`;
         return;
       }
-      if (no_perm(handler.perm)) return;
+      if (handler.perm && no_perm(handler.perm)) return;
       const app = await mkapp(handler.selfdb, handler.peerdb);
       await handler.fn(app, msg, msg.text.slice(cmdctnt[0].length + 1).trim());
       this.db.commit(this, handler.selfdb, app.db);
@@ -146,7 +154,7 @@ export class AppManager {
       for (const { name, is_endpoint, chain_after, perm, fn, selfdb, peerdb } of this
         .msg_handlers) {
         if (
-          !chain_after.reduce((prev, cur) => {
+          !(chain_after ?? []).reduce((prev, cur) => {
             const passed = passed_msg.get(cur);
             if (passed === undefined) {
               this.log.tmpl('internal-error')`Toposort failed: key ${cur} not found `;
@@ -157,7 +165,7 @@ export class AppManager {
         )
           continue;
         // Check for permission
-        if (no_perm(perm)) continue;
+        if (perm && no_perm(perm)) continue;
         // Make db
         const app = await mkapp(selfdb, peerdb);
         const res = await fn(app, msg);
@@ -218,9 +226,9 @@ export async function init_plugins(app: AppManager, plugins: LoadedPlugin[]) {
   const bfsq: string[] = [];
   for (const li of Object.values(msg_handlers)) {
     if (!(li.name in graph)) graph[li.name] = { count: 0, adj: [] };
-    graph[li.name].count = li.chain_after.length;
+    graph[li.name].count = (li.chain_after ?? []).length;
     if (graph[li.name].count === 0) bfsq.push(li.name);
-    for (const pre of li.chain_after) {
+    for (const pre of li.chain_after ?? []) {
       if (!(pre in graph)) graph[pre] = { count: 0, adj: [] };
       graph[pre].adj.push(li.name);
     }

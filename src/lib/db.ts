@@ -1,13 +1,20 @@
 import assert from 'assert';
 import { AppManager } from './app_manager.js';
 import * as fs from 'fs/promises';
+import { can_access } from './utils.js';
 
 /**
  * DB declaration in plugin's manifest should be of a subtype of this type,
  * however, it should not be exactly this type, for a better inference of DBs' types.
  */
 export type DbDecl = {
-  [name: string]: { proto?: () => unknown; nkeys: number | readonly string[] };
+  [name: string]: {
+    proto?: () => unknown;
+    nkeys: number | readonly string[];
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any  -- such function requires any to call...
+    read?: (k: any) => unknown;
+    write?: (k: unknown) => string;
+  };
 };
 /**
  * The actual type used for db to register databases. Not exposed to the plugins due to its complexity.
@@ -26,12 +33,12 @@ type GetNKeys<K extends readonly string[] | number> = K extends readonly string[
 type IsNatural<N extends number> = `${N}` extends `${infer _}${'-' | 'e' | 'E' | '.'}${infer _}`
   ? false
   : true;
-type Repeated<T, D extends unknown[], N extends number> = number extends N
-  ? T[]
+type Repeated<D extends unknown[], N extends number> = number extends N
+  ? (string | number)[]
   : N extends N
     ? D['length'] extends N
       ? []
-      : [...Repeated<T, [...D, 0], N>, T]
+      : [...Repeated<[...D, 0], N>, string | number]
     : never;
 
 class FileLock implements Disposable {
@@ -84,7 +91,7 @@ export class DbManager {
               {
                 kind: 'leaf',
                 nkeys: typeof decl.nkeys === 'number' ? decl.nkeys : decl.nkeys.length,
-                cache: {},
+                cache: undefined,
                 pending: 0,
               },
             ])
@@ -107,7 +114,9 @@ export class DbManager {
       if (!reg.cache) {
         const fname = `data/${path.join('/')}.json`;
         using _ = await FileLock.acquire(fname);
-        reg.cache = JSON.parse(await fs.readFile(fname, { encoding: 'utf8' })) as DataT<unknown>;
+        if (await can_access(fname)) {
+          reg.cache = JSON.parse(await fs.readFile(fname, { encoding: 'utf8' })) as DataT<unknown>;
+        }
       }
       return new Db(reg.cache) as T;
     };
@@ -144,6 +153,7 @@ export class DbManager {
       return res;
     };
     const write_db = (path: string[], db: Db<unknown>, reg: RegistryContent) => {
+      if (!db.data) return;
       if (typeof reg.cache === 'object' && reg.cache)
         reg.cache = replace(reg.nkeys, reg.cache as Nested<unknown>, db.data);
       else reg.cache = db.data;
@@ -180,34 +190,53 @@ export class DbManager {
 }
 
 export class Db<T, K extends number | readonly string[] = number> {
-  cache: DataT<T>;
-  data: DataT<T> = {};
-  constructor(cache: DataT<T>) {
+  cache: DataT<T> | undefined;
+  data: DataT<T> | undefined = undefined;
+  constructor(cache: DataT<T> | undefined) {
     this.cache = cache;
+    this.data = cache ? {} : undefined;
   }
-  get(...keys: Repeated<string | number, [], GetNKeys<K>>): T | undefined {
-    let reg: Nested<unknown> = this.data;
+
+  private get_impl(len: number, keys: Repeated<[], GetNKeys<K>>): [Nested<T>, string | number] {
+    let reg: Nested<unknown> = this.data!;
     let cache: Nested<unknown> | undefined = this.cache;
-    for (let i = 0; i < keys.length - 1; ++i) {
+    for (let i = 0; i < len - 1; ++i) {
       const k = keys[i];
       if (!(k in reg)) reg[k] = {};
-      if (cache && !(k in cache)) cache = undefined;
+      if (cache) {
+        if (!(k in cache)) cache = undefined;
+        else cache = cache[k] as Nested<unknown>;
+      }
       reg = reg[k] as Nested<unknown>;
     }
-    const k = keys[keys.length - 1];
-    if (cache && !(k in reg)) reg[k] = cache[k];
-    return reg[k] as T | undefined;
+    const k = keys[len - 1];
+    if (cache && !(k in reg) && k in cache) reg[k] = cache[k];
+    return [reg as Nested<T>, k];
   }
-  set(...keys: [...Repeated<string | number, [], GetNKeys<K>>, T]): void {
-    let reg: Nested<unknown> = this.data;
+  get(...keys: Repeated<[], GetNKeys<K>>): T | undefined {
+    if (keys.length === 0) return this.data as T;
+    const [reg, k] = this.get_impl(keys.length, keys);
+    return reg[k] as T;
+  }
+  get_or_insert(...keys: [...Repeated<[], GetNKeys<K>>, () => T]): T {
+    if (keys.length === 1)
+      return (this.data ? this.data : (this.data = keys[0] as NonNullable<T>)) as T;
+    const [reg, k] = this.get_impl(keys.length - 1, keys as unknown as Repeated<[], GetNKeys<K>>);
+    return k in reg ? (reg[k] as T) : (reg[k] = (keys[keys.length - 1] as () => T)());
+  }
+
+  set(...keys: [...Repeated<[], GetNKeys<K>>, T]): void {
+    if (keys.length === 1) {
+      this.data = keys[0] as NonNullable<T>;
+      return;
+    }
+    let reg: Nested<unknown> = this.data!;
     for (let i = 0; i < keys.length - 2; ++i) {
       const k = keys[i] as string | number;
       if (!(k in reg)) reg[k] = {};
       reg = reg[k] as Nested<unknown>;
     }
-    if (keys.length >= 2) {
-      const k = keys[keys.length - 2] as string | number;
-      reg[k] = keys[keys.length - 1];
-    } else this.data = keys[0] as NonNullable<T>;
+    const k = keys[keys.length - 2] as string | number;
+    reg[k] = keys[keys.length - 1];
   }
 }

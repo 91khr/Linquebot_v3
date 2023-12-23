@@ -1,6 +1,19 @@
-import { readFile } from 'fs/promises';
+import { mkdir, open, readFile } from 'fs/promises';
 import { inspect } from 'util';
+import { escape } from './utils.js';
 
+await mkdir('locales', { recursive: true });
+const raw_logger = {
+  file: await open('locales/raw.yaml', 'w'),
+  text: new Set(),
+  log(s: string) {
+    if (this.text.has(s)) return;
+    this.text.add(s);
+    void this.file.appendFile(`"${escape(s)}": undefined\n`);
+  },
+};
+
+type TransType = { [k: string]: string | undefined };
 export class I18nEngine {
   /**
    * Make an I18nEngine, should be used as constructor, since normal constructors can't be async.
@@ -9,12 +22,11 @@ export class I18nEngine {
    */
   static async mk(locale: string): Promise<I18nEngine> {
     const self = new I18nEngine();
-    if (locale === 'raw') self.translation = new Proxy({}, { get: (_, p) => p.toString() });
-    else await self.set_locale(locale);
+    await self.set_locale(locale);
     return self;
   }
 
-  private translation: { [k: string]: string | undefined } = {};
+  private translation: TransType = {};
   private constructor() {}
 
   tr(str: string): string {
@@ -32,9 +44,20 @@ export class I18nEngine {
   }
 
   async set_locale(locale: string) {
-    this.translation = JSON.parse((await readFile(`../locales/${locale}.json`)).toString()) as {
-      [k: string]: string;
-    };
+    const tr =
+      locale === 'raw'
+        ? {}
+        : (JSON.parse((await readFile(`locales/${locale}.json`)).toString()) as {
+            [k: string]: string;
+          });
+    this.translation = new Proxy(tr, {
+      get: (t, p) => {
+        if (p in t) return t[p.toString()];
+        const s = p.toString();
+        if (locale === 'raw') raw_logger.log(s);
+        return s;
+      },
+    });
   }
 
   clone(): I18nEngine {

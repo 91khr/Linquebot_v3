@@ -26,15 +26,15 @@ export type CmdListener = WithDoc & {
   kind: 'command';
   name: string;
   handler: (app: AnyApp, msg: IncomingMessage, text: string) => MaybePromiseLike<void>;
-  permission: HandlerPermission;
+  permission?: HandlerPermission;
 };
 export type MsgListener = WithDoc & {
   kind: 'message';
   name: string;
   is_endpoint: boolean;
-  chain_after: string[];
+  chain_after?: string[];
   handler: (app: AnyApp, msg: IncomingMessage) => MaybePromiseLike<boolean>;
-  permission: HandlerPermission;
+  permission?: HandlerPermission;
 };
 export type PluginListener = CmdListener | MsgListener;
 
@@ -56,11 +56,11 @@ export async function load_plugins(app: AppManager): Promise<LoadedPlugin[]> {
     recursive: false,
   })) {
     if (f.isFile() && (f.name === 'index.js' || !f.name.match(/.js$/))) continue;
-    using _ = app.log.region_tmpl()`Loading plugin ${f}`;
     const fname = f.isDirectory() ? path.join(f.path, 'index.js') : path.join(f.path, f.name);
+    using _ = app.log.region_tmpl()`Loading plugin ${f} at ../${fname}`;
     const plg = Object.assign(
-      { name: path.parse(f.path).name },
-      ((await import(fname)) as PluginModuleType).manifest(app)
+      { name: path.parse(f.name).name },
+      ((await import(`../${fname}`)) as PluginModuleType).manifest(app)
     );
     res.push(plg);
   }

@@ -3,8 +3,10 @@
 
 const commands = [
   'npx tsc',
+  'npx tsc-alias',
   'cp config.yaml dist/config.yaml',
   'cp config.example.yaml dist/config.example.yaml',
+  'cp -r locales dist/locales',
 ];
 
 /*****************************************/

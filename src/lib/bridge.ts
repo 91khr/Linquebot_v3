@@ -29,7 +29,9 @@ export type Chat = Replace<
   ChatImpl,
   {
     send_message(msg: SendingMessage | string): MaybePromiseLike<void>;
+    raw_send_message(msg: SendingMessage | string): MaybePromiseLike<void>;
     send_text_tmpl(ss: TemplateStringsArray, ...sv: unknown[]): MaybePromiseLike<void>;
+    raw_send_text_tmpl(ss: TemplateStringsArray, ...sv: unknown[]): MaybePromiseLike<void>;
   }
 >;
 

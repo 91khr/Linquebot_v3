@@ -22,7 +22,7 @@ let brief_help = '';
 const handle_help = (app: CoreApp, _msg: IncomingMessage, text: string) => {
   text = text.trim();
   if (!text) {
-    void app.chat.send_text_tmpl`这里是 ${app.conf.self_pronoun} 的帮助:\n${brief_help}`;
+    void app.chat.raw_send_text_tmpl`这里是 ${app.conf.self_pronoun} 的帮助:\n${brief_help}`;
     return;
   }
   const msg = full_help[text];
@@ -30,10 +30,10 @@ const handle_help = (app: CoreApp, _msg: IncomingMessage, text: string) => {
     void app.chat.send_text_tmpl`找不到 ${text} 的帮助`;
     return;
   }
-  void app.chat.send_text_tmpl`${text}:\n${msg}`;
+  void app.chat.raw_send_text_tmpl`${text}:\n${msg}`;
 };
 
-export function init_core(_app: AppManager, plugins: LoadedPlugin[]) {
+export function init_core(app: AppManager, plugins: LoadedPlugin[]) {
   brief_help = plugins
     .flatMap((plg) =>
       plg.listeners
@@ -41,14 +41,13 @@ export function init_core(_app: AppManager, plugins: LoadedPlugin[]) {
         .map((l) => `/${l.name}: ${l.doc_short}`)
     )
     .join('\n');
-  brief_help += '\n---\n';
-  brief_help += plugins
-    .flatMap((plg) =>
-      plg.listeners
-        .filter((l): l is MsgListener => l.kind === 'message')
-        .map((l) => `${l.name}: ${l.doc_short}`)
-    )
-    .join('\n');
+  const msg_listeners = plugins.flatMap((plg) =>
+    plg.listeners
+      .filter((l): l is MsgListener => l.kind === 'message')
+      .map((l) => `${l.name}: ${l.doc_short}`)
+  );
+  brief_help += app.i18n.tmpl`\n---\n${msg_listeners.length} Message listeners:\n`;
+  brief_help += msg_listeners.join('\n');
   for (const plg of plugins) for (const li of plg.listeners) full_help[li.name] = li.doc_long;
 }
 
@@ -60,7 +59,10 @@ export const loaded_core = (app: AppManager) =>
       listeners: [
         {
           kind: 'command',
-          doc_short: 'get help',
+          doc_short: app.i18n.tr('get help'),
+          doc_long: app.i18n.tr(
+            '/help [topic] to get help of a topic, if topic not present, the help index would be displayed instead'
+          ),
           name: 'help',
           permission: { kind: 'anyone' },
           handler: handle_help,
