@@ -17,8 +17,15 @@ export type AppConfig = {
   /** What should the bot call themself */
   self_pronoun: string;
   locale?: string;
-  reboot_on_watchdog?: boolean;
   log_level?: LogKinds;
+
+  internal?: {
+    db_write_batch_size?: number;
+  };
+  debug?: {
+    reboot_on_watchdog?: boolean;
+    die_for_uncaught_error?: boolean;
+  };
 };
 
 export const config_path = 'config.yaml';

@@ -32,7 +32,7 @@ jobs:
 
       - name: Commit Build # 提交文档到Git仓库
         env:
-          GIT_URL: 'git@github.com:Lhcfl/Linquebot_v2.git' # 项目的地址，注意要用SSH格式的。
+          GIT_URL: 'git@github.com:91khr/Linquebot_v3.git' # 项目的地址，注意要用SSH格式的。
         run: |
           cp package.json dist/
           cp package-lock.json dist/

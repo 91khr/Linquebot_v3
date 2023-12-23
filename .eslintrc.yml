@@ -23,7 +23,9 @@ rules:
   no-multiple-empty-lines: [error, { max: 3 }]
   no-restricted-globals: 'off'
   '@typescript-eslint/require-await': 'error'
-  no-shadow: [error, { allow: ['_'] }]
+  '@typescript-eslint/no-shadow': [error, { allow: ['_'] }]
+  no-shadow: off
+  '@typescript-eslint/no-explicit-any': [error, { ignoreRestArgs: true }]
 
 ignorePatterns:
   - 'coverage/*'

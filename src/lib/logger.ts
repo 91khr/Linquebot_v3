@@ -5,6 +5,7 @@
 
 import chalk from 'chalk';
 import { I18nEngine, global_i18n } from './i18n.js';
+import { mkRaii } from './utils.js';
 
 export type LogKinds = 'internal-error' | 'error' | 'warn' | 'info' | 'debug';
 type SingledKinds = Exclude<LogKinds, 'internal-error'>;
@@ -99,11 +100,7 @@ export class Logger {
   }
   raw_region(msg: string, kind: SingledKinds = 'info'): Disposable {
     this.raw_begin_region(msg, kind);
-    return {
-      [Symbol.dispose]: () => {
-        this.raw_end_region(undefined, kind);
-      },
-    };
+    return mkRaii(() => this.raw_end_region(undefined, kind));
   }
   raw_begin_region(msg: string, kind: SingledKinds = 'info') {
     const { print, color } = this.dispatch_kind(kind);
@@ -111,9 +108,11 @@ export class Logger {
     region_stack.push(color('│ '));
   }
   raw_end_region(msg?: string, kind: SingledKinds = 'info') {
-    const { print, color } = this.dispatch_kind(kind);
     region_stack.pop();
-    if (msg) print(region_stack.join('') + color('└ ' + msg));
+    if (msg) {
+      const { print, color } = this.dispatch_kind(kind);
+      print(region_stack.join('') + color('└ ' + msg));
+    }
   }
 
   header_tmpl(kind: SingledKinds = 'info'): (ss: TemplateStringsArray, ...vs: unknown[]) => void {

@@ -59,17 +59,20 @@ while (true) {
     });
 
     if (config.watchdog_interval !== 0) {
-      global_log.tmpl('debug')`[Watchdog] Watchdog setup`;
+      global_log.tmpl()`[Watchdog] Watchdog setup`;
       setInterval(() => {
         if (!watchdog_fed) {
-          global_log.header('[Watchdog] The application seems not responding, rebooting...');
+          global_log.header(
+            '[Watchdog] The application seems not responding, rebooting...',
+            'warn'
+          );
           res({ kind: 'watchdog' });
         }
         watchdog_fed = false;
       }, config.watchdog_interval * 2000);
-    } else global_log.tmpl('debug')`[Watchdog] Watchdog disabled, idle`;
+    } else global_log.tmpl()`[Watchdog] Watchdog disabled, idle`;
   });
   if (subevent.kind === 'watchdog') {
-    if (!(config.reboot_on_watchdog ?? true)) break;
-  } else if (subevent.kind !== 'reboot') break;
+    if (!(config.debug?.reboot_on_watchdog ?? true)) break;
+  } else if (subevent.kind !== 'shutdown') break;
 }
