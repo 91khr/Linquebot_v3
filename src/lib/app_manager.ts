@@ -1,4 +1,4 @@
-import { CmdListener, HandlerPermission, LoadedPlugin, MsgListener } from '@/lib/plugin.js';
+import { HandlerPermission, LoadedPlugin } from '@/lib/plugin.js';
 import { Logger, global_log } from './logger.js';
 import {
   Bridge,
@@ -11,7 +11,7 @@ import {
 import { AnyApp, App, PeerDbType } from './app.js';
 import { AppConfig, BridgeConfig } from './config.js';
 import { SupervisorMessage } from './supervisor_ipc.js';
-import { MaybePromiseLike, compare_perm, mkRaii } from './utils.js';
+import { MaybePromiseLike, compare_perm, ensure_exhaust, mkRaii } from './utils.js';
 import { I18nEngine, global_i18n } from './i18n.js';
 import { DbManager, DbType } from './db.js';
 import * as util from 'util';
@@ -71,11 +71,8 @@ export class AppManager {
   }
 
   private wrap_chat(i18n: I18nEngine, chat: ChatImpl) {
-    // eslint-disable-next-line @typescript-eslint/no-this-alias  -- Lazzzy to add a ctor (
-    const self = this;
     class Wrapper implements Chat {
       inner = chat;
-      app = self;
       get id() {
         return this.inner.id;
       }
@@ -194,25 +191,22 @@ export async function init_plugins(app: AppManager, plugins: LoadedPlugin[]) {
 
   app.log.put('Collecting command handlers and sorting message handlers');
 
-  app.cmd_handlers = Object.fromEntries(
-    plugins.flatMap((plg) =>
-      plg.listeners
-        .filter((li): li is CmdListener => li.kind === 'command')
-        .map((li) => [
-          li.name,
-          { fn: li.handler, perm: li.permission, selfdb: plg.name, peerdb: plg.peerdb },
-        ])
-    )
-  );
-
-  const graph: { [k: string]: { count: number; adj: string[] } } = {};
-  const msg_handlers = Object.fromEntries(
-    plugins.flatMap((plg) =>
-      plg.listeners
-        .filter((li): li is MsgListener => li.kind === 'message')
-        .map(({ name, is_endpoint, chain_after, permission, handler }) => [
-          name,
-          {
+  const msg_handlers: { [k: string]: (typeof app.msg_handlers)[0] } = {};
+  for (const plg of plugins)
+    for (const li of plg.listeners)
+      switch (li.kind) {
+        case 'command':
+          app.cmd_handlers[li.name] = {
+            fn: li.handler,
+            perm: li.permission,
+            selfdb: plg.name,
+            peerdb: plg.peerdb,
+          };
+          void app.bot.register_command(li.name, li.doc_short);
+          break;
+        case 'message':
+          const { name, is_endpoint, chain_after, permission, handler } = li;
+          msg_handlers[name] = {
             name,
             is_endpoint,
             chain_after,
@@ -220,10 +214,14 @@ export async function init_plugins(app: AppManager, plugins: LoadedPlugin[]) {
             perm: permission,
             selfdb: plg.name,
             peerdb: plg.peerdb,
-          },
-        ])
-    )
-  );
+          };
+          break;
+        default:
+          ensure_exhaust(li);
+          break;
+      }
+
+  const graph: { [k: string]: { count: number; adj: string[] } } = {};
   const bfsq: string[] = [];
   for (const li of Object.values(msg_handlers)) {
     if (!(li.name in graph)) graph[li.name] = { count: 0, adj: [] };

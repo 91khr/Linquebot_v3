@@ -17,6 +17,7 @@ export interface Bridge {
   logout(): MaybePromiseLike<void>;
   poll_message(): MaybePromiseLike<PolledMessage>;
   compare_message_id(a: unknown, b: unknown): number;
+  register_command(name: string, doc: string): MaybePromiseLike<void>;
 }
 
 export type ChatImpl = {

@@ -57,5 +57,6 @@ export function mkproto<T>(): () => T {
     throw new Error('mkproto should not be invoked!');
   };
 }
+export const ensure_exhaust = (v: never) => v;
 
 export type MaybePromiseLike<T> = T | PromiseLike<T>;

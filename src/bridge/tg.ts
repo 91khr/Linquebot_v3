@@ -2,7 +2,7 @@ import * as br from '@/lib/bridge.js';
 import { BridgeConfig } from '@/lib/config.js';
 import { global_log } from '@/lib/logger.js';
 import { MaybePromiseLike } from '@/lib/utils.js';
-import TelegramBot, { Message } from 'node-telegram-bot-api';
+import TelegramBot, { BotCommand, Message } from 'node-telegram-bot-api';
 
 const mkmsg = (msg: Message): br.IncomingMessage => ({
   id: msg.message_id,
@@ -69,6 +69,7 @@ export class Bridge implements br.Bridge {
   bot: TelegramBot | undefined = undefined;
   conf: TgConfig | undefined = undefined;
   msgqueue: Message[] = [];
+  cmdlist: BotCommand[] = [];
   waker: ((msg: Message) => void) | undefined = undefined;
 
   login(
@@ -113,5 +114,9 @@ export class Bridge implements br.Bridge {
   }
   compare_message_id(a: Message, b: Message): number {
     return a.message_id === b.message_id ? 0 : a.message_id < b.message_id ? -1 : 1;
+  }
+  async register_command(name: string, doc: string): Promise<void> {
+    this.cmdlist.push({ command: name, description: doc });
+    await this.bot?.setMyCommands(this.cmdlist);
   }
 }
