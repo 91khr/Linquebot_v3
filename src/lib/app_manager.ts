@@ -79,19 +79,22 @@ export class AppManager {
       get id() {
         return this.inner.id;
       }
-      raw_send_message(msg: SendingMessage | string): MaybePromiseLike<void> {
+      delete_message(id: unknown) {
+        return this.inner.delete_message(id);
+      }
+      raw_send_message(msg: SendingMessage | string) {
         const msgv = typeof msg === 'string' ? { text: msg } : msg;
         return this.inner.send_message(msgv);
       }
-      send_message(msg: SendingMessage | string): MaybePromiseLike<void> {
+      send_message(msg: SendingMessage | string) {
         const msgv = typeof msg === 'string' ? { text: msg } : msg;
         msgv.text = i18n.tr(msgv.text);
         return this.inner.send_message(msgv);
       }
-      raw_send_text_tmpl(ss: TemplateStringsArray, ...sv: unknown[]): MaybePromiseLike<void> {
+      raw_send_text_tmpl(ss: TemplateStringsArray, ...sv: unknown[]) {
         return this.raw_send_message(i18n.tmpl(ss, ...sv));
       }
-      send_text_tmpl(ss: TemplateStringsArray, ...sv: unknown[]): MaybePromiseLike<void> {
+      send_text_tmpl(ss: TemplateStringsArray, ...sv: unknown[]) {
         return this.send_message(i18n.tmpl(ss, ...sv));
       }
     }

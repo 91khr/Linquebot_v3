@@ -1,5 +1,6 @@
 import { global_log } from '@/lib/logger.js';
 import { MaybePromiseLike } from './utils.js';
+import { BridgeConfig } from './config.js';
 
 /**
  * A bridge between an IM and the bot.
@@ -11,7 +12,7 @@ import { MaybePromiseLike } from './utils.js';
  */
 export interface Bridge {
   /** Log the bot in */
-  login(login: unknown): MaybePromiseLike<LoginStatus>;
+  login(conf: BridgeConfig): MaybePromiseLike<LoginStatus>;
   /** Log the bot out */
   logout(): MaybePromiseLike<void>;
   poll_message(): MaybePromiseLike<PolledMessage>;
@@ -19,8 +20,9 @@ export interface Bridge {
 }
 
 export type ChatImpl = {
-  id: string;
-  send_message(msg: SendingMessage): MaybePromiseLike<void>;
+  id: string | number;
+  send_message(msg: SendingMessage): MaybePromiseLike<IncomingMessage>;
+  delete_message(id: unknown): MaybePromiseLike<void>;
 };
 type Replace<T, U> = {
   [k in keyof T | keyof U]: k extends keyof U ? U[k] : k extends keyof T ? T[k] : never;
@@ -28,10 +30,13 @@ type Replace<T, U> = {
 export type Chat = Replace<
   ChatImpl,
   {
-    send_message(msg: SendingMessage | string): MaybePromiseLike<void>;
-    raw_send_message(msg: SendingMessage | string): MaybePromiseLike<void>;
-    send_text_tmpl(ss: TemplateStringsArray, ...sv: unknown[]): MaybePromiseLike<void>;
-    raw_send_text_tmpl(ss: TemplateStringsArray, ...sv: unknown[]): MaybePromiseLike<void>;
+    send_message(msg: SendingMessage | string): MaybePromiseLike<IncomingMessage>;
+    raw_send_message(msg: SendingMessage | string): MaybePromiseLike<IncomingMessage>;
+    send_text_tmpl(ss: TemplateStringsArray, ...sv: unknown[]): MaybePromiseLike<IncomingMessage>;
+    raw_send_text_tmpl(
+      ss: TemplateStringsArray,
+      ...sv: unknown[]
+    ): MaybePromiseLike<IncomingMessage>;
   }
 >;
 
@@ -40,7 +45,7 @@ export type BridgeError =
   | { kind: 'unknown'; info?: string };
 
 export type User = {
-  id: string;
+  id: string | number;
   name: string;
 };
 

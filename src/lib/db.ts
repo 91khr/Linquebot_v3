@@ -36,12 +36,12 @@ type GetNKeys<K extends readonly string[] | number> = K extends readonly string[
 type IsNatural<N extends number> = `${N}` extends `${infer _}${'-' | 'e' | 'E' | '.'}${infer _}`
   ? false
   : true;
-type Repeated<D extends unknown[], N extends number> = number extends N
-  ? (string | number)[]
+type Repeated<D extends readonly unknown[], N extends number> = number extends N
+  ? readonly (string | number)[]
   : N extends N
     ? D['length'] extends N
-      ? []
-      : [...Repeated<[...D, 0], N>, string | number]
+      ? readonly []
+      : readonly [...Repeated<[...D, 0], N>, string | number]
     : never;
 
 class FileLock implements Disposable {
@@ -137,7 +137,7 @@ export class DbManager {
         else rec_read(reg.nkeys, reg, reg.cache);
         break;
       }
-      return new Db(reg.cache) as T;
+      return new Db(reg.cache, reg.nkeys) as T;
     };
     let reg = this.registry;
     for (const [i, k] of p.entries()) {
@@ -224,12 +224,14 @@ export class DbManager {
 export class Db<T, K extends number | readonly string[] = number> {
   cache: DataT<T> | undefined;
   data: DataT<T> | undefined = undefined;
-  constructor(cache: DataT<T> | undefined) {
+  depth: number;
+  constructor(cache: DataT<T> | undefined, depth: number) {
     this.cache = cache;
+    this.depth = depth;
     this.data = cache ? {} : undefined;
   }
 
-  private get_impl(len: number, keys: Repeated<[], GetNKeys<K>>): [Nested<T>, string | number] {
+  private get_impl(len: number, keys: readonly (number | string)[]): [Nested<T>, string | number] {
     let reg: Nested<unknown> = this.data!;
     let cache: Nested<unknown> | undefined = this.cache;
     for (let i = 0; i < len - 1; ++i) {
@@ -253,8 +255,34 @@ export class Db<T, K extends number | readonly string[] = number> {
   get_or_insert(...keys: [...Repeated<[], GetNKeys<K>>, () => T]): T {
     if (keys.length === 1)
       return (this.data ? this.data : (this.data = keys[0] as NonNullable<T>)) as T;
-    const [reg, k] = this.get_impl(keys.length - 1, keys as unknown as Repeated<[], GetNKeys<K>>);
+    const [reg, k] = this.get_impl(keys.length - 1, keys as (number | string)[]);
     return k in reg ? (reg[k] as T) : (reg[k] = (keys[keys.length - 1] as () => T)());
+  }
+
+  *slice<N extends number>(
+    ...keys: Repeated<[], N>
+  ): Generator<{ path: Repeated<Repeated<[], N>, GetNKeys<K>>; value: T }> {
+    type ResType = { path: Repeated<Repeated<[], N>, GetNKeys<K>>; value: T };
+    if (this.depth === 0) {
+      yield { path: [] as const, value: this.data } as ResType;
+      return;
+    }
+    function* iterate(
+      depth: number,
+      path: readonly (number | string)[],
+      reg: Nested<T> | T
+    ): Generator<ResType> {
+      if (depth === 0) {
+        yield { path, value: reg } as ResType;
+        return;
+      }
+      const creg = reg as Nested<T>;
+      for (const k of Object.keys(creg))
+        if (creg[k]) yield* iterate(depth - 1, path.concat(k), creg[k] as Nested<T>);
+    }
+    const [preg, k] = this.get_impl(keys.length, keys);
+    const reg = preg[k];
+    if (reg) yield* iterate(this.depth - keys.length, [], reg as Nested<T>);
   }
 
   set(...keys: [...Repeated<[], GetNKeys<K>>, T]): void {

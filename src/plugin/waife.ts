@@ -3,8 +3,12 @@ import { AppManager } from '@/lib/app_manager.js';
 import { IncomingMessage } from '@/lib/bridge.js';
 import { PluginDynManifest } from '@/lib/plugin.js';
 import { ensure_extend, mkproto } from '@/lib/utils.js';
+import { tmpdir } from 'os';
+import * as fs from 'fs/promises';
+import { spawn } from 'child_process';
 
 type WaifeData = {
+  name: string;
   waife: string;
   date: string;
 };
@@ -13,7 +17,7 @@ const waife_db = {
     active_users: {
       proto: mkproto<Set<string>>(),
       nkeys: ['group'],
-      read: (s: string[]) => new Set(s),
+      read: (s: (string | number)[]) => new Set(s),
       write: (s: Set<string>) => [...s.values()],
     },
     waifes: {
@@ -28,22 +32,18 @@ type WaifeApp = MyApp<typeof waife_db>;
 function msg_handler(app: WaifeApp, msg: IncomingMessage) {
   if (!msg.from) return true;
   const users = app.db.active_users.get_or_insert(app.chat.id, () => new Set());
-  if (users.has(msg.from.id)) {
-    app.log.tmpl('debug')`Replicate user ${msg.from.id}`;
-    return true;
-  }
+  if (users.has(msg.from.name)) return true;
   users.add(msg.from.name);
-  app.log.tmpl('debug')`Get user ${msg.from.id} => ${users}`;
   return true;
 }
 
-function waife_handler(app: WaifeApp, msg: IncomingMessage) {
+function waife_get(app: WaifeApp, msg: IncomingMessage) {
   if (!msg.from) return;
   const data = app.db.waifes.get_or_insert(app.chat.id, msg.from.id, () => ({
+    name: '',
     waife: '',
     date: '',
   }));
-  app.log.tmpl('debug')`Waife data ${data}`;
   const today = new Date().toDateString();
   if (data.date === today) {
     void app.chat.send_message('You have rolled a waife today!');
@@ -55,12 +55,47 @@ function waife_handler(app: WaifeApp, msg: IncomingMessage) {
     data.date = today;
     const cand = [...users.values()].filter((n) => n !== msg.from!.name);
     if (cand.length === 0) break;
+    data.name = msg.from.name;
     data.waife = cand[Math.floor(Math.random() * cand.length)];
     void app.chat.send_text_tmpl`Your waife today is ${data.waife}`;
     return;
   } while (false);
   void app.chat
     .send_text_tmpl`No users in group, please wait for ${app.conf.self_pronoun} to collect more!`;
+}
+
+async function waife_graph(app: WaifeApp, msg: IncomingMessage) {
+  let edges = '';
+  const today = new Date().toDateString();
+  for (const { value } of app.db.waifes.slice<1>(app.chat.id)) {
+    if (value.date !== today) continue;
+    edges += `"${value.name}" -> "${value.waife}";\n`;
+  }
+  const src = 'digraph G {\nnode[shape=box];\n' + edges + '}';
+  const pray = app.chat.send_message({ text: '少女祈祷中...', reply_to_id: msg.id });
+  try {
+    const [fname, outname] = [`${tmpdir()}/waife.gv`, `${tmpdir()}/waife.png`];
+    await fs.writeFile(fname, src, { encoding: 'utf8' });
+    await new Promise((res, rej) => {
+      const proc = spawn('dot', [fname, '-Tpng', '-o', outname]);
+      proc.on('close', (code) => (code === 0 ? res(void 0) : rej(code)));
+    });
+    const data = await fs.readFile(outname);
+    await app.chat.send_message({
+      text: '',
+      reply_to_id: msg.id,
+      assets: [{ kind: 'image', data }],
+    });
+  } catch (e) {
+    await app.chat.send_text_tmpl`生成图片时出现了错误: ${e}`;
+  } finally {
+    void app.chat.delete_message((await pray).id);
+  }
+}
+
+function waife_handler(app: WaifeApp, msg: IncomingMessage, text: string) {
+  if (text === 'get' || !text) waife_get(app, msg);
+  else if (text === 'graph') void waife_graph(app, msg);
 }
 
 export const manifest = (app: AppManager) =>

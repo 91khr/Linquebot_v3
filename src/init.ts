@@ -15,7 +15,12 @@ if (conf.log_level) global_log.level = conf.log_level;
 const bot = await (async () => {
   using _ = global_log.region_tmpl()`Logging in ${conf.active_bridge}`;
   const res = await load_bridge(conf.active_bridge);
-  const status = await res.login(conf.bridges[conf.active_bridge]?.login);
+  const brconf = conf.bridges[conf.active_bridge];
+  if (!brconf) {
+    global_log.tmpl('error')`Config to bridge ${conf.active_bridge} not present`;
+    process.exit(1);
+  }
+  const status = await res.login(brconf);
   if (status.kind === 'error') {
     global_log.tmpl('error')`Error logging to ${conf.active_bridge}: ${status.info}`;
     process.exit(1);
