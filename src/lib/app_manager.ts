@@ -103,9 +103,7 @@ export class AppManager {
 
   async dispatch({ chat: arg_chat, msg }: PolledMessage) {
     const mgrdb = await this.db.scope<DbType<typeof mgrdata>>('manager');
-    this.log.tmpl('debug')`Got: ${util.inspect(arg_chat, { colors: true })} ${util.inspect(msg, {
-      colors: true,
-    })}`;
+    this.log.tmpl('debug')`Got: ${util.inspect(msg, { colors: true })}`;
     using _write_db = mkRaii(() => this.db.commit(this, 'manager', mgrdb));
     if (!(arg_chat.id in mgrdb.locale)) mgrdb.locale.set(arg_chat.id, 'raw');
     const cur_locale = mgrdb.locale.get(arg_chat.id)!;

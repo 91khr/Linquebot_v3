@@ -1,17 +1,7 @@
 import { mkdir, open, readFile } from 'fs/promises';
 import { inspect } from 'util';
 import { escape } from './utils.js';
-
-await mkdir('locales', { recursive: true });
-const raw_logger = {
-  file: await open('locales/raw.yaml', 'w'),
-  text: new Set(),
-  log(s: string) {
-    if (this.text.has(s)) return;
-    this.text.add(s);
-    void this.file.appendFile(`"${escape(s)}": undefined\n`);
-  },
-};
+import jsYaml from 'js-yaml';
 
 type TransType = { [k: string]: string | undefined };
 export class I18nEngine {
@@ -27,6 +17,7 @@ export class I18nEngine {
   }
 
   private translation: TransType = {};
+  private raw_logger: { log: (s: string) => void; finish: () => void } = { log() {}, finish() {} };
   private constructor() {}
 
   tr(str: string): string {
@@ -44,17 +35,34 @@ export class I18nEngine {
   }
 
   async set_locale(locale: string) {
-    const tr =
-      locale === 'raw'
-        ? {}
-        : (JSON.parse((await readFile(`locales/${locale}.json`)).toString()) as {
-            [k: string]: string;
-          });
+    let tr;
+    if (locale === 'raw') {
+      tr = {};
+      await mkdir('locales', { recursive: true });
+      const text = jsYaml.load(await readFile('locales/raw.yaml', { encoding: 'utf8' })) as object;
+      const raw_logger = {
+        file: await open('locales/raw.yaml', 'a'),
+        text: new Set(Object.keys(text)),
+        prom: Promise.resolve(),
+        log(s: string) {
+          if (this.text.has(s)) return;
+          this.text.add(s);
+          this.prom = this.prom.then(() => this.file.appendFile(`"${escape(s)}": undefined\n`));
+        },
+        finish() {
+          void this.prom.then(() => this.file.close());
+        },
+      };
+      this.raw_logger = raw_logger;
+    } else
+      tr = JSON.parse((await readFile(`locales/${locale}.json`)).toString()) as {
+        [k: string]: string;
+      };
     this.translation = new Proxy(tr, {
       get: (t, p) => {
         if (p in t) return t[p.toString()];
         const s = p.toString();
-        if (locale === 'raw') raw_logger.log(s);
+        if (locale === 'raw') this.raw_logger.log(s);
         return s;
       },
     });

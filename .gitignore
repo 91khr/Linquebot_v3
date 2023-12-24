@@ -1,6 +1,6 @@
 node_modules/
 config.yml
-locales/
+locales/raw.yaml
 
 # lock文件
 pnpm-lock.yaml
